@@ -1,0 +1,18 @@
+* { box-sizing: border-box; }
+html { background: #091018; }
+body { margin: 0; min-width: 320px; background: #091018; color: #f1f7fb; font-family: Inter, Roboto, ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+button { -webkit-tap-highlight-color: transparent; }
+.safe-bottom { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+.screen-enter { animation: screen-in 220ms ease-out; }
+.pressable { transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease; }
+.pressable:active { transform: scale(.985); }
+.icon-button { display: inline-grid; place-items: center; border-radius: 999px; padding: 4px; transition: transform 150ms ease, color 150ms ease; }
+.icon-button:active { transform: scale(.9); }
+.nav-button { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 7px 3px max(4px, env(safe-area-inset-bottom)); color: #93a8b9; font-size: 12px; font-weight: 500; transition: color 150ms ease; }
+.nav-button::before { position: absolute; top: -3px; height: 3px; width: 32px; border-radius: 0 0 999px 999px; background: transparent; content: ''; }
+.nav-button.active { color: #4ca8ff; }
+.nav-button.active::before { background: #4ca8ff; }
+.nav-icon { display: grid; height: 38px; width: 58px; place-items: center; border-radius: 999px; }
+.nav-button.active .nav-icon { background: #0d2d47; }
+@keyframes screen-in { from { opacity: .35; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+::-webkit-scrollbar { width: 0; height: 0; }

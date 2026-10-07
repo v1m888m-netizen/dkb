@@ -1,0 +1,63 @@
+const { chromium } = require('C:/Users/elias/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+(async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const context = await browser.newContext({ viewport: { width: 360, height: 730 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const shot = name => page.screenshot({ path: path.resolve(__dirname, `../outputs/${name}.png`), animations: 'disabled' });
+  const button = name => page.getByRole('button', { name, exact: true });
+  await page.goto('http://127.0.0.1:5174');
+  await page.evaluate(() => document.fonts.ready);
+  await shot('home');
+  await button('More').tap();
+  await page.getByRole('dialog', { name: 'More' }).waitFor();
+  await shot('more-sheet');
+  assert.equal(await page.locator('.sheet-modal').evaluate(el => getComputedStyle(el).position), 'static');
+  const sheetBox = await page.locator('.sheet-modal').boundingBox();
+  assert.equal(Math.round(sheetBox.y + sheetBox.height), 730);
+  await page.touchscreen.tap(25, 30);
+  assert.equal(await page.getByRole('dialog').count(), 0);
+  await button('More').tap();
+  await button('Account details').tap();
+  await page.getByRole('dialog', { name: 'Account details' }).waitFor();
+  await button('Close editor').tap();
+  await button('Transfer').tap();
+  assert.equal(await page.getByRole('button', { name: /Reuse transfer/ }).count(), 7);
+  await shot('transfer');
+  await button('Search transfers').tap();
+  await page.getByRole('textbox', { name: 'Search transfers' }).fill('stichting');
+  assert.equal(await page.getByRole('button', { name: /Reuse transfer/ }).count(), 1);
+  await button('Close search').tap();
+  await page.getByRole('button', { name: /Reuse transfer/ }).first().tap();
+  assert.equal(await page.getByLabel('Amount (€)').inputValue(), '0.14');
+  await button('Review transfer').tap();
+  await button('Confirm demo transfer').tap();
+  await button('Done').tap();
+  assert.equal(await page.getByTestId('home-total').textContent(), '€0,57');
+  await button('Open Girokonto').tap();
+  assert.equal(await page.getByTestId('account-balance').textContent(), '€0,57');
+  await button('Back to Home').tap();
+  for (const width of [320, 360, 390, 430]) {
+    await page.setViewportSize({ width, height: 730 });
+    for (const view of ['home', 'more', 'transfer']) {
+      if (view === 'more') await button('More').tap();
+      if (view === 'transfer') await button('Transfer').tap();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${view}: no overflow at ${width}`);
+      if (view === 'more') await button('Dismiss More menu').tap();
+      if (view === 'transfer') await button('Back').tap();
+    }
+  }
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+  await context.setOffline(true);
+  await page.reload();
+  await button('Transfer').waitFor();
+  await button('Transfer').tap();
+  assert.equal(await page.getByRole('button', { name: /Reuse transfer/ }).count(), 7);
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({ passed: ['mobile sheet alignment and backdrop dismissal', 'account details', 'all seven transfers', 'search', 'prefill and demo transfer synchronization', '320–430px responsive layouts', 'offline reload and transfer navigation', 'no browser errors'], errors }, null, 2));
+  await browser.close();
+})().catch(error => { console.error(error); process.exit(1); });

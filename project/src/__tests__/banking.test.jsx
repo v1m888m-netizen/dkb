@@ -1,0 +1,140 @@
+import React from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { BankingProvider, bankingReducer, initialState } from '../state/BankingContext'
+import { useLongPress } from '../hooks/useLongPress'
+import { formatBalance } from '../utils/currency'
+import App from '../App'
+
+afterEach(() => { cleanup(); vi.useRealTimers() })
+function Harness({ onHold }) {
+  const handlers = useLongPress(onHold)
+  return <button {...handlers}>Hold me</button>
+}
+function touch(target, type, x = 10, y = 10) {
+  fireEvent[type](target, { touches: type === 'touchEnd' ? [] : [{ clientX: x, clientY: y }] })
+}
+
+describe('long press', () => {
+  it('requires 800ms, fires once, and consumes the subsequent click', () => {
+    vi.useFakeTimers()
+    const callback = vi.fn()
+    render(<Harness onHold={callback} />)
+    const row = screen.getByRole('button')
+    touch(row, 'touchStart')
+    act(() => vi.advanceTimersByTime(799))
+    expect(callback).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(1))
+    expect(callback).toHaveBeenCalledTimes(1)
+    touch(row, 'touchEnd')
+    expect(fireEvent.click(row)).toBe(false)
+    act(() => vi.advanceTimersByTime(1000))
+    expect(callback).toHaveBeenCalledTimes(1)
+  })
+  it.each(['movement', 'scroll', 'release', 'cancel', 'multitouch', 'blur', 'unmount'])('cancels on %s', (reason) => {
+    vi.useFakeTimers()
+    const callback = vi.fn()
+    const view = render(<Harness onHold={callback} />)
+    const row = screen.getByRole('button')
+    touch(row, 'touchStart')
+    act(() => vi.advanceTimersByTime(300))
+    if (reason === 'movement') touch(row, 'touchMove', 10, 30)
+    if (reason === 'scroll') fireEvent.scroll(window)
+    if (reason === 'release') touch(row, 'touchEnd')
+    if (reason === 'cancel') fireEvent.touchCancel(row)
+    if (reason === 'multitouch') fireEvent.touchStart(row, { touches: [{ clientX: 10, clientY: 10 }, { clientX: 20, clientY: 20 }] })
+    if (reason === 'blur') fireEvent.blur(window)
+    if (reason === 'unmount') view.unmount()
+    act(() => vi.advanceTimersByTime(1000))
+    expect(callback).not.toHaveBeenCalled()
+  })
+  it('prevents a native context menu without preventing touch scrolling', () => {
+    render(<Harness onHold={() => {}} />)
+    const row = screen.getByRole('button')
+    expect(fireEvent.contextMenu(row)).toBe(false)
+    expect(fireEvent.touchStart(row, { touches: [{ clientX: 0, clientY: 0 }] })).toBe(true)
+  })
+  it('supports keyboard holds', () => {
+    vi.useFakeTimers()
+    const callback = vi.fn()
+    render(<Harness onHold={callback} />)
+    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter' })
+    act(() => vi.advanceTimersByTime(800))
+    expect(callback).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('shared state and editors', () => {
+  it('opens the Home editor only after two seconds', () => {
+    vi.useFakeTimers()
+    render(<BankingProvider><App /></BankingProvider>)
+    touch(screen.getByRole('button', { name: 'Home. Hold to edit balance.' }), 'touchStart')
+    act(() => vi.advanceTimersByTime(1999))
+    expect(screen.queryByRole('dialog')).toBe(null)
+    act(() => vi.advanceTimersByTime(1))
+    expect(screen.getByRole('dialog').textContent).toContain('Edit balance')
+  })
+  it('restores focus under StrictMode after closing the modal', async () => {
+    render(<React.StrictMode><BankingProvider><App /></BankingProvider></React.StrictMode>)
+    const trigger = screen.getByRole('button', { name: 'Home. Hold to edit balance.' })
+    trigger.focus()
+    fireEvent.doubleClick(trigger)
+    expect(document.activeElement).toBe(screen.getByLabelText('Amount (€)'))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await act(async () => { await Promise.resolve() })
+    expect(document.activeElement).toBe(trigger)
+  })
+  it('normalizes signs, preserves IDs and leaves unrelated rows unchanged', () => {
+    const old = initialState.transactions[0]
+    const next = bankingReducer(initialState, { type: 'transaction/update', id: old.id, changes: { ...old, amount: 12.34, id: 'wrong-id', isPositive: false } })
+    expect(next.transactions[0]).toMatchObject({ id: old.id, amount: 12.34, isPositive: true })
+    expect(next.transactions[1]).toBe(initialState.transactions[1])
+    expect(initialState.transactions[0].amount).toBe(-18.99)
+    expect(bankingReducer(initialState, { type: 'balance/set', amount: NaN })).toBe(initialState)
+    expect(formatBalance(-1234.56)).toBe('−€1.234,56')
+  })
+  it('updates Home and Girokonto from one balance and edits the selected transaction', () => {
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    render(<BankingProvider><App /></BankingProvider>)
+    expect(screen.getByTestId('home-total').textContent).toBe('€0,71')
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Home. Hold to edit balance.' }))
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '-300' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(screen.getByTestId('home-total').textContent).toBe('−€300,00')
+    expect(screen.getByTestId('home-card-balance').textContent).toBe('−€300,00')
+    fireEvent.click(screen.getByRole('button', { name: 'Open Girokonto' }))
+    expect(screen.getByTestId('account-balance').textContent).toBe('−€300,00')
+    expect(screen.queryByRole('navigation')).toBe(null)
+    vi.useFakeTimers()
+    touch(screen.getByTestId('transaction-1'), 'touchStart')
+    act(() => vi.advanceTimersByTime(800))
+    fireEvent.change(screen.getByLabelText('Name / Title'), { target: { value: 'Updated merchant' } })
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '42.5' } })
+    fireEvent.change(screen.getByLabelText('Icon'), { target: { value: 'generic' } })
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '07.10.26' } })
+    fireEvent.change(screen.getByLabelText('Type / Description'), { target: { value: 'Refund' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    const row = screen.getByTestId('transaction-1')
+    expect(row.textContent).toContain('Updated merchant')
+    expect(row.textContent).toContain('07.10.26 · Refund')
+    expect(row.querySelector('.positive').textContent).toBe('+€42.50')
+    expect(row.querySelector('.generic')).not.toBe(null)
+    expect(screen.getByTestId('account-balance').textContent).toBe('−€300,00')
+  })
+  it('cancel and Escape discard drafts; hidden amounts remain hidden across screens', () => {
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    render(<BankingProvider><App /></BankingProvider>)
+    const header = screen.getByRole('button', { name: 'Home. Hold to edit balance.' })
+    fireEvent.doubleClick(header)
+    fireEvent.change(screen.getByLabelText('Amount (€)'), { target: { value: '999' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByTestId('home-total').textContent).toBe('€0,71')
+    fireEvent.doubleClick(header)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBe(null)
+    fireEvent.click(screen.getByRole('button', { name: 'Hide balances' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Girokonto' }))
+    expect(screen.getByTestId('account-balance').textContent).toBe('••••••')
+    expect(screen.getByTestId('transaction-1').textContent).not.toContain('18.99')
+  })
+})

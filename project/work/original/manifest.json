@@ -1,0 +1,13 @@
+{
+  "name": "DKB Mobile Banking",
+  "short_name": "DKB Banking",
+  "description": "A refined mobile banking dashboard demo.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09131d",
+  "theme_color": "#09131d",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
